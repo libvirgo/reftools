@@ -41,7 +41,7 @@
 //
 // Usage:
 //
-// 	% fillstruct [-modified] -file=<filename> -offset=<byte offset> -line=<line number>
+//	% fillstruct [-modified] -file=<filename> -offset=<byte offset> -line=<line number>
 //
 // Flags:
 //
@@ -53,11 +53,9 @@
 //
 // -line:     line number of the struct literal, optional if -offset is present
 //
-//
 // If -offset as well as -line are present, then the tool first uses the
 // more specific offset information. If there was no struct literal found
 // at the given offset, then the line information is used.
-//
 package main
 
 import (
@@ -70,10 +68,12 @@ import (
 	"go/format"
 	"go/token"
 	"go/types"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/tools/go/ast/astutil"
 	"golang.org/x/tools/go/buildutil"
@@ -163,7 +163,18 @@ func absPath(filename string) (string, error) {
 }
 
 func byOffset(lprog []*packages.Package, path string, offset int) error {
-	f, pkg, pos, err := findPos(lprog, path, offset)
+	file, _ := os.Open(path)
+	data, _ := io.ReadAll(file)
+	buf := strings.NewReader(string(data))
+	var offsetNotRune int64
+	for i:=0;i<offset;i++ {
+		_, size, err := buf.ReadRune()
+		if err != nil {
+			return err
+		}
+		offsetNotRune += int64(size)
+	}
+	f, pkg, pos, err := findPos(lprog, path, int(offsetNotRune))
 	if err != nil {
 		return err
 	}
@@ -175,10 +186,12 @@ func byOffset(lprog []*packages.Package, path string, offset int) error {
 
 	start := lprog[0].Fset.Position(lit.Pos()).Offset
 	end := lprog[0].Fset.Position(lit.End()).Offset
+	startRune := utf8.RuneCount(data[:start])
+	endRune := utf8.RuneCount(data[:end])
 
 	importNames := buildImportNameMap(f)
 	newlit, lines := zeroValue(pkg.Types, importNames, lit, litInfo)
-	out, err := prepareOutput(newlit, lines, start, end)
+	out, err := prepareOutput(newlit, lines, startRune, endRune)
 	if err != nil {
 		return err
 	}
